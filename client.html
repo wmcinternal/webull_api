@@ -26,34 +26,27 @@
 
     <div class="form-group">
         <label>Account ID</label>
-        <input type="text" id="account_id" >
+        <input type="text" id="account_id" value="C8193691">
     </div>
 
     <div class="form-group">
         <label>ETF Name</label>
-        <input type="text" id="symbol" >
+        <input type="text" id="symbol" value="SCHX">
     </div>
 
     <div class="form-group">
         <label>Amount ($ USD)</label>
-        <input type="number" step="0.01" id="amount" >
+        <input type="number" step="0.01" id="amount" value="100" >
     </div>
 
     <div class="form-group">
-        <label>Frequency</label>
-        <select id="frequency">
-            <option value="DAILY" selected>Daily</option>
-            <option value="WEEKLY">Weekly</option>
-            <option value="MONTHLY">Monthly</option>
-        </select>
+        <label>Monthly Execution Day</label>
+        <input type="text" id="day_of_month" value="5"></input>
     </div>
 
-    <div class="form-group">
-        <label>Purchase Date & Time</label>
-        <input type="datetime-local" id="schedule_time">
-    </div>
 
-    <button type="button" onclick="submitDcaOrder()">Submit DCA Order</button>
+    <button type="button" onclick="submitDcaOrder()">Schedule Cron Job</button>
+    <button type="button" onclick="executeOneCycle()" style="background: #10b981; margin-left: 10px;">&#9889 Execute One DCA Cycle</button>
 
     <div id="responseContainer" style="display: none;">
         <h3>Order Result</h3>
@@ -67,10 +60,7 @@
 
 <script>
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 30, 0, 0);
-    document.getElementById('schedule_time').value = tomorrow.toISOString().slice(0, 16);
+
 
     async function submitDcaOrder() {
             const container = document.getElementById("responseContainer");
@@ -83,8 +73,7 @@
                 account_id: document.getElementById("account_id").value,
                 symbol: document.getElementById("symbol").value,
                 amount: parseFloat(document.getElementById("amount").value),
-                frequency: document.getElementById("frequency").value,
-                schedule_time: document.getElementById("schedule_time").value
+                day_of_month: parseInt(document.getElementById("day_of_month").value)
             };
 
             try {
@@ -100,6 +89,33 @@
                 resultContent.innerHTML = "<p style='color: #ef4444;'>Error submitting order: " + error + "</p>";
             }
         }
+
+    async function executeOneCycle() {
+    const container = document.getElementById("responseContainer");
+    const resultContent = document.getElementById("resultContent");
+    
+    container.style.display = "block";
+    resultContent.innerHTML = "Executing DCA trade...";
+
+    const payload = {
+        account_id: document.getElementById("account_id").value,
+        symbol: document.getElementById("symbol").value,
+        amount: parseFloat(document.getElementById("amount").value)
+    };
+
+    try {
+        const response = await fetch("/execute-now", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        resultContent.innerHTML = "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
+    } catch (error) {
+        resultContent.innerHTML = "<p style='color: #ef4444;'>Execution Error: " + error + "</p>";
+    }
+}
 
 
 </script>
