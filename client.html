@@ -12,8 +12,15 @@
         input, select { width: 100%; padding: 8px; box-sizing: border-box; background: #141414; border: 1px solid #1e293b; color: #fff; border-radius: 4px; }
         button { padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background: #0369a1; }
-        #responseContainer { margin-top: 20px; padding: 15px; border: 1px solid #38bdf8; background: #141414; border-radius: 6px; max-width: 500px; }
-        pre { background: #000; padding: 10px; color: #38bdf8; overflow-x: auto; font-size: 12px; }
+        #responseContainer { margin-top: 20px; padding: 20px; border: 1px solid #1e293b; background: #141414; border-radius: 8px; max-width: 600px; }
+        .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .card { background: #0a0a0a; border: 1px solid #334155; padding: 12px; border-radius: 6px; }
+        .card-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; }
+        .card-value { font-size: 18px; font-weight: bold; color: #38bdf8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        th { color: #94a3b8; font-weight: 600; }
+        td { color: #f8fafc; }
     </style>
 
 
@@ -46,7 +53,7 @@
 
 
     <button type="button" onclick="submitDcaOrder()">Schedule Cron Job</button>
-    <button type="button" onclick="executeOneCycle()" style="background: #10b981; margin-left: 10px;">&#9889 Execute One DCA Cycle</button>
+    <button type="button" id="simToggleBtn" onclick="toggleSimulation()" style="background: #10b981; margin-left: 10px;">▶️ Start Simulation (Every 10s)</button>
 
     <div id="responseContainer" style="display: none;">
         <h3>Order Result</h3>
@@ -84,7 +91,15 @@
                 });
                 
                 const data = await response.json();
-                resultContent.innerHTML = "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
+                resultContent.innerHTML = `
+                    <div class="card">
+                        <div class="card-label">Schedule Status</div>
+                        <div class="card-value" style="color: #10b981;">${data.status}</div>
+                        <p style="font-size: 13px; color: #cbd5e1; margin-bottom: 0;">
+                            Recurring order scheduled for <strong>${data.execution_day}</strong>.
+                        </p>
+                    </div>
+                `;
             } catch (error) {
                 resultContent.innerHTML = "<p style='color: #ef4444;'>Error submitting order: " + error + "</p>";
             }
@@ -95,7 +110,7 @@
     const resultContent = document.getElementById("resultContent");
     
     container.style.display = "block";
-    resultContent.innerHTML = "Executing DCA trade...";
+    resultContent.innerHTML = "Executing order...";
 
     const payload = {
         account_id: document.getElementById("account_id").value,
@@ -111,11 +126,91 @@
         });
         
         const data = await response.json();
-        resultContent.innerHTML = "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
+
+        if (data.status === "FAILED") {
+                resultContent.innerHTML = `<p style="color: #ef4444; font-weight: bold;">❌ ${data.reason}</p>`;
+                return;
+            }
+
+        let portfolioRows = "";
+        for (const [ticker, pos] of Object.entries(data.portfolio)) {
+            portfolioRows += `
+                <tr>
+                    <td><strong>${ticker}</strong></td>
+                    <td>${pos.total_shares}</td>
+                    <td>$${pos.total_invested.toFixed(2)}</td>
+                </tr>`;
+        }
+
+        resultContent.innerHTML = `
+                <div class="summary-grid">
+                    <div class="card">
+                        <div class="card-label">Last Order Executed</div>
+                        <div class="card-value">${data.symbol}</div>
+                        <div style="font-size: 12px; color: #10b981; margin-top: 4px;">
+                            +${data.shares_bought} shares @ $${data.buy_price.toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">Remaining Cash Balance</div>
+                        <div class="card-value" style="color: #10b981;">$${data.remaining_cash.toFixed(2)}</div>
+                    </div>
+                </div>
+
+                <h4 style="margin-bottom: 8px; color: #38bdf8;">Current Stock Portfolio</h4>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset</th>
+                            <th>Total Shares Owned</th>
+                            <th>Total Amount Invested</th>
+                        </tr>
+                    </thead>
+                    <tbody>${portfolioRows}</tbody>
+                </table>
+            `;
+        
+
+
+
+        
     } catch (error) {
         resultContent.innerHTML = "<p style='color: #ef4444;'>Execution Error: " + error + "</p>";
     }
-}
+    }
+
+
+    let autoRunInterval=null;
+    function toggleSimulation(){
+
+        const btn=document.getElementById("simToggleBtn");
+
+        if (autoRunInterval === null) {
+            
+            executeOneCycle();
+            autoRunInterval = setInterval(executeOneCycle, 10000);
+            
+            btn.innerHTML = "⏹️ Stop Simulation";
+            btn.style.background = "#ef4444"; // Red color
+        } else {
+            
+            stopSimulation();
+        }
+    }
+
+    function stopSimulation() {
+
+        const btn=document.getElementById("simToggleBtn");
+
+        if (autoRunInterval!==null) {
+            clearInterval(autoRunInterval);
+            autoRunInterval=null;
+            btn.innerHTML="▶️ Start Simulation (Every 10s)";
+            btn.style.background="#10b981";
+        }
+
+    }
+
 
 
 </script>

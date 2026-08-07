@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -23,19 +23,14 @@ APP_SECRET=os.getenv("WEBULL_APP_SECRET")
 
 accounts_db = {
     "C8193691": {
-        "cash_balance": 1000.00,  
-        "positions": {
-            "SCHX": {
-                "total_shares": 0.0,
-                "total_invested": 0.0
-            },
-            "AGG": {
-                "total_shares": 0.0,
-                "total_invested": 0.0
-            }
-        }
+        "cash_balance": 5000.00,  
+        "positions": {},
+        "scheduled_jobs": []
     }
+
+
 }
+
 
 trade_client=None
 if APP_KEY and APP_SECRET:
@@ -69,12 +64,18 @@ def execute_recurring_dca(account_id: str, symbol: str, amount: float):
 
     account=accounts_db.get(account_id)
     if not account:
-        print(f"❌ Account {account_id} not found.")
-        return
+        return {"status": "FAILED", "reason": f"Account {account_id} not found."}
 
     if account["cash_balance"] < amount:
-        print(f"❌ Insufficient funds for {account_id}. Balance: ${account['cash_balance']}")
-        return
+        return {
+            "status": "FAILED",
+            "reason": f"Insufficient funds. Balance: ${account['cash_balance']:.2f}"
+        }
+    
+    if "simulated_date" not in account:
+        account["simulated_date"] = datetime.now()
+    else:
+        account["simulated_date"] += timedelta(days=30)
 
     current_price = get_etf_price(symbol)
     shares_bought = round(amount / current_price, 4)
@@ -87,17 +88,23 @@ def execute_recurring_dca(account_id: str, symbol: str, amount: float):
     account["positions"][symbol]["total_shares"] += shares_bought
     account["positions"][symbol]["total_invested"] += amount
 
-    print(f"✅ DCA Order Executed for {account_id}:")
-    print(f"   Bought: {shares_bought} shares of {symbol} @ ${current_price}")
-    print(f"   Remaining Cash: ${round(account['cash_balance'], 2)}")
-    print(f"   Total Portfolio Shares in {symbol}: {round(account['positions'][symbol]['total_shares'], 4)}")
-
+    return {
+        "status": "SUCCESS",
+        "execution_date": account["simulated_date"].strftime("%b %d, %Y"),
+        "symbol": symbol,
+        "amount_spent": amount,
+        "buy_price": current_price,
+        "shares_bought": shares_bought,
+        "remaining_cash": account["cash_balance"],
+        "portfolio": account["positions"]
+    }
 
 @app.post("/schedule-order")
 async def schedule_order(order: ValidateOrder):
 
+    account=accounts_db.get(order.account_id)
 
-    if order.account_id not in accounts_db:
+    if not account:
         raise HTTPException(status_code=404, detail="Account ID not found in database.")
 
     job_id = f"DCA-{order.account_id}-{order.symbol.upper()}"
@@ -115,12 +122,62 @@ async def schedule_order(order: ValidateOrder):
         replace_existing=True
     )
 
+    if "schedule_jobs" not in account:
+        account["scheduled_jobs"]=[]
+
+    existing_job=next((j for h in account["scheduled_jobs"] if j["symbol"]==order.symbol.upper() ), None)
+
+    if existing_job:
+        existing_job["amount"] = order.amount
+        existing_job["day_of_month"] = order.day_of_month
+    else:
+        account["scheduled_jobs"].append({
+            "symbol": order.symbol.upper(),
+            "amount": order.amount,
+            "day_of_month": order.day_of_month
+        })
+
+
     return {
-        "status": "RECURRING_SCHEDULED",
-        "frequency": "MONTHLY",
-        "execution_day": f"Day {order.day_of_month} of every month at 09:30 AM",
         "account_id": order.account_id,
-        "current_cash": accounts_db[order.account_id]["cash_balance"]
+        "status": "RECURRING_SCHEDULED",
+        "symbol": order.symbol.upper(),
+        "amount": order.amount,
+        "execution_day": f"Day {order.day_of_month} of every month at 09:30 AM"
+
+    }
+
+class ExecuteAllRequest(BaseModel):
+    account_id: str
+
+
+@app.post("/execute-all-schedules")
+async def execute_all_schedules(req: ExecuteAllRequest):
+    account = accounts_db.get(req.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    schedules = account.get("scheduled_jobs", [])
+    if not schedules:
+        return {"status": "FAILED", "reason": "No active DCA schedules found. Please schedule an order first!"}
+
+    executed_trades = []
+    
+    
+    for job in schedules:
+        result = execute_recurring_dca(req.account_id, job["symbol"], job["amount"])
+        if result["status"] == "FAILED":
+            return result
+        executed_trades.append(result)
+
+    last_trade_date = executed_trades[-1].get("execution_date", "N/A") if executed_trades else "N/A"
+
+    return {
+        "status": "SUCCESS",
+        "execution_date": last_trade_date,
+        "remaining_cash": account["cash_balance"],
+        "trades_executed": executed_trades,
+        "portfolio": account["positions"]
     }
 
 
@@ -132,28 +189,12 @@ class ExecuteNowRequest(BaseModel):
 
 @app.post("/execute-now")
 async def execute_now(req: ExecuteNowRequest):
-    if req.account_id not in accounts_db:
-        raise HTTPException(status_code=404, detail="Account not found.")
-
-    
-    execute_recurring_dca(req.account_id, req.symbol.upper(), req.amount)
-
-    account = accounts_db[req.account_id]
-    pos = account["positions"].get(req.symbol.upper(), {})
-
-    return {
-        "status": "EXECUTED",
-        "account_id": req.account_id,
-        "symbol": req.symbol.upper(),
-        "remaining_cash": round(account["cash_balance"], 2),
-        "total_shares": round(pos.get("total_shares", 0.0), 4),
-        "total_invested": round(pos.get("total_invested", 0.0), 2),
-    }
+    return execute_recurring_dca(req.account_id, req.symbol.upper(), req.amount)
 
 
 
 
 @app.get("/", response_class=HTMLResponse)
 async def frontend():
-    with open("client.html") as file:
+    with open("client.html", encoding="utf-8") as file:
         return file.read()
