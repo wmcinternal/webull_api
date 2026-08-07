@@ -122,10 +122,10 @@ async def schedule_order(order: ValidateOrder):
         replace_existing=True
     )
 
-    if "schedule_jobs" not in account:
+    if "scheduled_jobs" not in account:
         account["scheduled_jobs"]=[]
 
-    existing_job=next((j for h in account["scheduled_jobs"] if j["symbol"]==order.symbol.upper() ), None)
+    existing_job=next((j for j in account["scheduled_jobs"] if j["symbol"]==order.symbol.upper() ), None)
 
     if existing_job:
         existing_job["amount"] = order.amount
