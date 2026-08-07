@@ -80,7 +80,7 @@
                 account_id: document.getElementById("account_id").value,
                 symbol: document.getElementById("symbol").value,
                 amount: parseFloat(document.getElementById("amount").value),
-                
+                day_of_month: parseInt(document.getElementById("day_of_month").value)
             };
 
             try {
@@ -94,10 +94,13 @@
                 resultContent.innerHTML = `
                     <div class="card">
                         <div class="card-label">Schedule Status</div>
-                        <div class="card-value" style="color: #10b981;">${data.status}</div>
-                        <p style="font-size: 13px; color: #cbd5e1; margin-bottom: 0;">
-                            Recurring order scheduled for <strong>${data.execution_day}</strong>.
-                        </p>
+                        <div class="card-value" style="color: #10b981; margin-bottom: 10px;">${data.status}</div>
+                        <div style="font-size: 13px; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;">
+                            <div>• <strong>Account:</strong> ${data.account_id}</div>
+                            <div>• <strong>Asset Symbol:</strong> ${data.symbol}</div>
+                            <div>• <strong>Monthly Amount:</strong> $${data.amount} USD</div>
+                            <div>• <strong>Schedule Time:</strong> ${data.execution_day}</div>
+                        </div>
                     </div>
                 `;
             } catch (error) {
@@ -106,77 +109,77 @@
         }
 
     async function executeOneCycle() {
-    const container = document.getElementById("responseContainer");
-    const resultContent = document.getElementById("resultContent");
-    
-    container.style.display = "block";
-    resultContent.innerHTML = "Executing order...";
-
-    const payload = {
-        account_id: document.getElementById("account_id").value,
-        symbol: document.getElementById("symbol").value,
-        amount: parseFloat(document.getElementById("amount").value)
-    };
-
-    try {
-        const response = await fetch("/execute-all-schedules", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
+        const container = document.getElementById("responseContainer");
+        const resultContent = document.getElementById("resultContent");
         
-        const data = await response.json();
+        container.style.display = "block";
+        resultContent.innerHTML = "Executing order...";
 
-        if (data.status === "FAILED") {
-                resultContent.innerHTML = `<p style="color: #ef4444; font-weight: bold;">❌ ${data.reason}</p>`;
-                return;
+        const payload = {
+            account_id: document.getElementById("account_id").value,
+        };
+
+        try {
+            const response = await fetch("/execute-all-schedules", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await response.json();
+
+            if (data.status === "FAILED") {
+                    resultContent.innerHTML = `<p style="color: #ef4444; font-weight: bold;">❌ ${data.reason}</p>`;
+                    stopSimulation();
+                    return;
+                }
+            
+            let tradesSummary="";
+            data.trades_executed.forEach(t => {
+                tradesSummary += `<div>• Purchased +${t.shares_bought} ${t.symbol} @ $${t.buy_price.toFixed(2)} ($${t.amount_spent})</div>`;
+            });
+
+            let portfolioRows = "";
+            for (const [ticker, pos] of Object.entries(data.portfolio)) {
+                portfolioRows += `
+                    <tr>
+                        <td><strong>${ticker}</strong></td>
+                        <td>${pos.total_shares}</td>
+                        <td>$${pos.total_invested.toFixed(2)}</td>
+                    </tr>`;
             }
 
-        let portfolioRows = "";
-        for (const [ticker, pos] of Object.entries(data.portfolio)) {
-            portfolioRows += `
-                <tr>
-                    <td><strong>${ticker}</strong></td>
-                    <td>${pos.total_shares}</td>
-                    <td>$${pos.total_invested.toFixed(2)}</td>
-                </tr>`;
-        }
-
-        resultContent.innerHTML = `
-                <div class="summary-grid">
-                    <div class="card">
-                        <div class="card-label">Last Order Executed</div>
-                        <div class="card-value">${data.symbol}</div>
-                        <div style="font-size: 12px; color: #10b981; margin-top: 4px;">
-                            +${data.shares_bought} shares @ $${data.buy_price.toFixed(2)}
+            resultContent.innerHTML = `
+                    <div class="summary-grid">
+                        <div class="card">
+                            <div class="card-label">Last Order Executed</div>
+                            <div style="font-size: 13px; color: #10b981; margin-top: 4px;">
+                                ${tradesSummary}
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-label">Remaining Cash Balance</div>
+                            <div class="card-value" style="color: #10b981;">$${data.remaining_cash.toFixed(2)}</div>
                         </div>
                     </div>
-                    <div class="card">
-                        <div class="card-label">Remaining Cash Balance</div>
-                        <div class="card-value" style="color: #10b981;">$${data.remaining_cash.toFixed(2)}</div>
-                    </div>
-                </div>
 
-                <h4 style="margin-bottom: 8px; color: #38bdf8;">Current Stock Portfolio</h4>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Asset</th>
-                            <th>Total Shares Owned</th>
-                            <th>Total Amount Invested</th>
-                        </tr>
-                    </thead>
-                    <tbody>${portfolioRows}</tbody>
-                </table>
-            `;
-        
-
-
-
-        
-    } catch (error) {
-        resultContent.innerHTML = "<p style='color: #ef4444;'>Execution Error: " + error + "</p>";
-    }
+                    <h4 style="margin-bottom: 8px; color: #38bdf8;">Current Stock Portfolio</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Asset</th>
+                                <th>Total Shares Owned</th>
+                                <th>Total Amount Invested</th>
+                            </tr>
+                        </thead>
+                        <tbody>${portfolioRows}</tbody>
+                    </table>
+                `;
+        } 
+        catch (error) {
+            resultContent.innerHTML = "<p style='color: #ef4444;'>Execution Error: " + error + "</p>";
+            stopSimulation();
+        }
     }
 
 
