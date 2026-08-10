@@ -66,6 +66,49 @@
         </table>
     </div>
 
+
+    <div style="max-width: 600px; margin-top: 20px;">
+        <h4 style="color: #38bdf8; margin-bottom: 8px;">Active DCA Recurring Plans</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Monthly Amount</th>
+                    <th>Execution Day</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="schedulesTableBody">
+                <tr><td colspan="4" style="color: #64748b;">No active recurring schedules</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+
+    <div style="max-width: 600px; margin-top: 20px;">
+        <h4 style="color: #38bdf8; margin-bottom: 8px;">Order History & Audit Ledger</h4>
+        <div style="max-height: 250px; overflow-y: auto; border: 1px solid #1e293b; border-radius: 4px;">
+            <table style="margin-top: 0;">
+                <thead style="position: sticky; top: 0; background: #141414;">
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Type</th>
+                        <th>Symbol</th>
+                        <th>Shares</th>
+                        <th>Price</th>
+                        <th>Total Cost</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody" style="font-family: monospace;">
+                    <tr><td colspan="7" style="color: #64748b; font-family: system-ui;">No execution history recorded</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+
+
     <div class="form-group">
         <label>ETF Name</label>
         <input type="text" id="symbol" value="SCHX">
@@ -162,8 +205,10 @@
                     resultContent.innerHTML = `<p style="color: #ef4444; font-weight: bold;">❌ ${data.reason}</p>`;
                     stopSimulation();
                     return;
-                }
-            
+            }
+        
+            await loadAccountSummary();
+
             let tradesSummary="";
             data.trades_executed.forEach(t => {
                 tradesSummary += `<div>• Purchased +${t.shares_bought} ${t.symbol} @ $${t.buy_price.toFixed(2)} ($${t.amount_spent})</div>`;
@@ -250,7 +295,7 @@
         const account_id=document.getElementById("account_id").value;
 
         try {
-            const response= await fetch (`/account-summary?${account_id}`);
+            const response= await fetch (`/account-summary?account_id=${account_id}`);
             const data=await response.json();
 
             document.getElementById("netValueDisplay").textContent= `$${data["net_account_value"].toFixed(2)}`;
@@ -270,7 +315,7 @@
                         <tr>
                             <td><strong>${symbol}</strong></td>
                             <td>${pos.total_shares}</td>
-                            <td><${avgPrice.toFixed(2)}/td?
+                            <td>$${avgPrice.toFixed(2)}</td>
                             <td>${pos.market_value.toFixed(2)}</td>
                         
                         </tr>`;
@@ -279,17 +324,81 @@
 
             document.getElementById("portfolioTableBody").innerHTML=rows;
 
+                    
+            let scheduleRows = "";
+            const jobs = data["scheduled_jobs"] || [];
+
+            if (jobs.length === 0) {
+                scheduleRows = `<tr><td colspan="4" style="color: #64748b;">No active recurring schedules</td></tr>`;
+            } else {
+                jobs.forEach(job => {
+                    scheduleRows += `
+                        <tr>
+                            <td><strong>${job.symbol}</strong></td>
+                            <td>$${job.amount.toFixed(2)} USD</td>
+                            <td>Day ${job.day_of_month} of month</td>
+                            <td>
+                                <button type="button" onclick="cancelSchedule('${job.symbol}')" style="background: #ef4444; padding: 4px 8px; font-size: 12px;">Cancel</button>
+                            </td>
+                        </tr>`;
+                });
+            }
+            document.getElementById("schedulesTableBody").innerHTML = scheduleRows;
+                      
+            
+            
+            let historyRows = "";
+            const logs = data["order_history"] || [];
+
+            if (logs.length === 0) {
+                historyRows = `<tr><td colspan="7" style="color: #64748b; font-family: system-ui;">No execution history recorded</td></tr>`;
+            } else {
+                logs.forEach(log => {
+                    historyRows += `
+                        <tr style="border-bottom: 1px solid #1e293b;">
+                            <td style="color: #94a3b8; font-size: 12px; font-family: system-ui;">${log.timestamp}</td>
+                            <td style="font-size: 12px; font-family: system-ui;">${log.type}</td>
+                            <td><strong style="color: #38bdf8;">${log.symbol}</strong></td>
+                            <td>${log.shares}</td>
+                            <td>${log.price}</td>
+                            <td style="color: #ef4444; font-weight: bold;">${log.total}</td>
+                            <td><span style="color: #10b981; background: #064e3b; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-family: system-ui;">${log.status}</span></td>
+                        </tr>`;
+                });
+            }
+            document.getElementById("historyTableBody").innerHTML = historyRows;
+
+
         }
         catch (error) {
             console.error("Error loading account summary:", error);
         }
-        
+
+            
     }
 
     window.addEventListener("DOMContentLoaded", loadAccountSummary);
 
     document.getElementById("account_id").addEventListener("change", loadAccountSummary);
-        
+    
+
+    async function cancelSchedule(symbol) {
+
+        const account_id=document.getElementById("account_id").value;
+
+        try {
+            const response= await fetch("/cancel-schedule", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_id: account_id, symbol: symbol })
+            });
+            await loadAccountSummary();
+        }
+        catch(error) {
+            console.error("Error cancelling schedule:", error)
+        }
+
+    }
 
     
 

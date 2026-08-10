@@ -88,6 +88,22 @@ def execute_recurring_dca(account_id: str, symbol: str, amount: float):
     account["positions"][symbol]["total_shares"] += shares_bought
     account["positions"][symbol]["total_invested"] += amount
 
+
+    if "order_history" not in account:
+        account["order_history"]=[]
+    
+    account["order_history"].insert(0, {
+
+        "timestamp": account["simulated_date"].strftime("%b %d, %Y %I:%M %p"),
+        "type": "RECURRING DCA",
+        "symbol": symbol,
+        "shares": f"+{shares_bought:.4f}",
+        "price": f"{current_price:.2f}",
+        "total": f"-{amount:.2f}",
+        "status": "FILLED"
+    })
+
+
     return {
         "status": "SUCCESS",
         "execution_date": account["simulated_date"].strftime("%b %d, %Y"),
@@ -203,7 +219,7 @@ async def get_account_summary(account_id: str):
     portfolio_value=0.0
     portfolio={}
 
-    for symbol, pos in account["positions"].items:
+    for symbol, pos in account["positions"].items():
         current_price=get_etf_price(symbol)
         market_value=pos["total_shares"]*current_price
         portfolio_value+=market_value
@@ -211,8 +227,8 @@ async def get_account_summary(account_id: str):
             "total_shares": pos["total_shares"],
             "total_invested": pos["total_invested"],
             "current_price": current_price,
-            "market_price": market_price
-        }
+            "market_value": market_value
+    }
     
     net_account_value=account["cash_balance"]+ portfolio_value
 
@@ -221,10 +237,38 @@ async def get_account_summary(account_id: str):
         "net_account_value": net_account_value,
         "cash_balance": account["cash_balance"],
         "portfolio": portfolio,
-        "scheduled_jobs": account.get("scheduled_jobs", [])
+        "scheduled_jobs": account.get("scheduled_jobs", []),
+        "order_history": account.get("order_history", [])
     }
 
 
+class CancelSchedule(BaseModel):
+    account_id: str
+    symbol: str
+
+
+@app.post("/cancel-schedule")
+async def cancel_schedule(req: CancelSchedule):
+
+    account=accounts_db.get(req.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    
+    symbol_upper=req.symbol.upper()
+    job_id = f"DCA-{req.account_id}-{symbol_upper}"
+
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    
+    account["scheduled_jobs"]=[j for j in account.get("scheduled_jobs", []) if symbol_upper!=j["symbol"]]
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Cancelled recurring order for {symbol_upper}",
+        "scheduled_jobs": account["scheduled_jobs"]
+    }
 
 
 
