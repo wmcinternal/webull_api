@@ -187,6 +187,47 @@ class ExecuteNowRequest(BaseModel):
     amount: float
 
 
+@app.get("/account-summary")
+async def get_account_summary(account_id: str):
+
+    if account_id not in accounts_db:
+        accounts_db[account_id]={
+            "cash_balance": 5000.00,
+            "positions":  {},
+            "scheduled_jobs": [],
+            "order_history": []
+        }
+    
+    account=accounts_db[account_id]
+
+    portfolio_value=0.0
+    portfolio={}
+
+    for symbol, pos in account["positions"].items:
+        current_price=get_etf_price(symbol)
+        market_value=pos["total_shares"]*current_price
+        portfolio_value+=market_value
+        portfolio[symbol]= {
+            "total_shares": pos["total_shares"],
+            "total_invested": pos["total_invested"],
+            "current_price": current_price,
+            "market_price": market_price
+        }
+    
+    net_account_value=account["cash_balance"]+ portfolio_value
+
+    return {
+        "account_id": account_id,
+        "net_account_value": net_account_value,
+        "cash_balance": account["cash_balance"],
+        "portfolio": portfolio,
+        "scheduled_jobs": account.get("scheduled_jobs", [])
+    }
+
+
+
+
+
 @app.post("/execute-now")
 async def execute_now(req: ExecuteNowRequest):
     return execute_recurring_dca(req.account_id, req.symbol.upper(), req.amount)
