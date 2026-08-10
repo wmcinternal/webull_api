@@ -29,7 +29,19 @@
 
 <body>
 
-    <h2>Client Trading Portal</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; max-width: 600px;">
+        <h2>Client Trading Portal</h2>
+        <div style="display: flex; gap: 8px;">
+        
+            <div id="simDateBadge" style="padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #1e293b; color: #38bdf8; border: 1px solid #334155;">
+                Loading Date...
+            </div>
+        
+            <div id="marketBadge" style="padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #1e293b; color: #94a3b8;">
+                Checking...
+            </div>
+        </div>
+    </div>
 
     <div class="form-group">
         <label>Account ID</label>
@@ -131,6 +143,16 @@
     <div id="responseContainer" style="display: none;">
         <h3>Order Result</h3>
         <div id="resultContent"></div>
+    </div>
+
+
+    <div style="max-width: 600px; margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+        <div style="flex: 1;">
+            <input type="number" id="deposit_amount" placeholder="Enter custom deposit amount ($ USD)" step="0.01" value="500.00" style="margin: 0;">
+        </div>
+        <button type="button" onclick="handleCustomDeposit()" style="background: #10b981; white-space: nowrap;">
+            💵 Deposit Cash
+        </button>
     </div>
 
 
@@ -346,7 +368,7 @@
             document.getElementById("schedulesTableBody").innerHTML = scheduleRows;
                       
             
-            
+
             let historyRows = "";
             const logs = data["order_history"] || [];
 
@@ -400,6 +422,72 @@
 
     }
 
+
+    async function checkMarketClock() {
+
+        try {
+            const response=await fetch("/market-status");
+            const data= await response.json();
+
+            document.getElementById("simDateBadge").innerText= `📅 ${data.display_text}`;
+
+            const badge=document.getElementById("marketBadge");
+            if (data.is_open) {
+                badge.innerText=`🟢 Market OPEN`;
+                badge.style.background = "#064e3b";
+                badge.style.color = "#10b981";
+            }
+            else {
+                badge.innerText = `🔴 Market CLOSED (Weekend)`;
+                badge.style.background = "#7f1d1d";
+                badge.style.color = "#ef4444";
+            }
+
+        }
+        catch (error) {
+            console.error("Market status check failed:", err);
+        }
+
+    }
+
+    setInterval(checkMarketClock, 1000);
+
+
+
+    async function handleCustomDeposit() {
+
+        const account_id = document.getElementById("account_id").value;
+        const amountInput = document.getElementById("deposit_amount");
+        const amount = parseFloat(amountInput.value);
+
+        if (isNaN(amount) || amount <= 0) {
+            alert("Please enter a valid positive deposit amount.");
+            return;
+        }
+
+        try {
+
+            const response= await fetch("/deposit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ account_id: account_id, amount: amount })
+            });
+
+            const data= await response.json();
+            if (!response.ok) {
+                alert("Deposit failed: " + data.detail);
+                return;                
+            }
+
+            await loadAccountSummary();
+
+            amountInput.value="";
+        }
+        catch (error) {
+            console.error("Deposit error:", error);
+        }
+        
+    }
     
 
 

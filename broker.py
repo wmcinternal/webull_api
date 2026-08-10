@@ -18,6 +18,33 @@ scheduler.start()
 APP_KEY=os.getenv("WEBULL_APP_KEY")
 APP_SECRET=os.getenv("WEBULL_APP_SECRET")
 
+SERVER_START_TIME=datetime.now()
+
+
+@app.get("/market-status")
+def market_status() -> dict:
+
+    elapsed_seconds = (datetime.now() - SERVER_START_TIME).total_seconds()
+    simulated_days_passed = int(elapsed_seconds // 5)
+
+    current_sim_date = SERVER_START_TIME + timedelta(days=simulated_days_passed)
+    
+    weekday_index = current_sim_date.weekday() # 0=Mon, ..., 5=Sat, 6=Sun
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    day_name = days[weekday_index]
+
+
+    is_open = weekday_index < 5
+
+    return {
+        "is_open": is_open,
+        "day_name": day_name,
+        "date_str": current_sim_date.strftime("%Y-%b-%d"),
+        "display_text": f"{current_sim_date.strftime('%Y-%b-%d')} ({day_name})",
+        "status": "OPEN" if is_open else "CLOSED (Weekend)"
+    }
+
+
 
 
 
