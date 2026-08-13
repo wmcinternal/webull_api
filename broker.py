@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 from datetime import datetime, timedelta
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
@@ -10,15 +11,40 @@ from webull.trade.trade_client import TradeClient
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
+
+APP_KEY=os.getenv("WEBULL_APP_KEY")
+APP_SECRET=os.getenv("WEBULL_APP_SECRET")
+
 app=FastAPI(title="Webull API")
 
 scheduler=BackgroundScheduler()
 scheduler.start()
 
-APP_KEY=os.getenv("WEBULL_APP_KEY")
-APP_SECRET=os.getenv("WEBULL_APP_SECRET")
 
 SERVER_START_TIME=datetime.now()
+
+
+trade_client=None
+if APP_KEY and APP_SECRET:
+    try:
+                
+        api_client=ApiClient(APP_KEY, APP_SECRET, "us")
+        api_client.add_endpoint("us", "broker-api.sandbox.webull.com")
+        trade_client=TradeClient(api_client)
+        print("✅ Webull Broker API Client Initialized.")
+        
+        res = trade_client.account_v2.get_account_list()
+        if res.status_code == 200:
+            print("Success!", json.dumps(res.json(), indent=2))
+        else:
+            print("Error:", res.status_code, res.text)
+    
+    except Exception as e:
+        print(f"Webull SDK init failed ({e}). Defaulting to MOCK MODE.")
+else:
+    print("No Webull API credentials found in environment. Running in MOCK MODE.")
+
+
 
 
 @app.get("/market-status")
@@ -58,20 +84,6 @@ accounts_db = {
 
 }
 
-
-trade_client=None
-if APP_KEY and APP_SECRET:
-    try:
-                
-        api_client=ApiClient(app_key=APP_KEY, app_secret=APP_SECRET, region_id="us")
-        api_client.add_endpoint("us", "https://broker-api.sandbox.webull.com")
-        trade_client=TradeClient(api_client)
-        print("Successfully initialized Webull Sandbox SDK.")
-    
-    except Exception as e:
-        print(f"Webull SDK init failed ({e}). Defaulting to MOCK MODE.")
-else:
-    print("No Webull API credentials found in environment. Running in MOCK MODE.")
 
 
 class ValidateOrder(BaseModel):
@@ -380,10 +392,10 @@ async def withdraw(req: CashOperationReq):
 @app.post("/execute-now")
 async def execute_now(req: ExecuteNowRequest):
 
-    cal = market_status()
-    if not cal["is_open"]:
-        return {"status": "FAILED", "reason": f"Market CLOSED ({cal['day_name']} / Weekend). Instant buy unavailable."}
+    if req.amount < 5.00:
+        raise HTTPException(status_code=400, detail="Minimum buy order size is $5.00 USD.")
 
+    cal = market_status()
     account=accounts_db[req.account_id]
     if not account:
         raise HTTPException(status_code=404, detail="Account not found.")
@@ -391,15 +403,16 @@ async def execute_now(req: ExecuteNowRequest):
     if account["cash_balance"] < req.amount:
         return {"status": "FAILED", "reason": f"Insufficient funds. Balance: ${account['cash_balance']:.2f}"}
 
-    symbol_upper = req.symbol.upper()
+    symbol_upper = req.symbol.strip().upper()
+
     current_price = get_etf_price(symbol_upper)
+
     shares_bought = round(req.amount / current_price, 4)
 
+
+
+
     account["cash_balance"]-=req.amount
-
-
-
-    return execute_recurring_dca(req.account_id, req.symbol.upper(), req.amount)
 
     if symbol_upper not in account["positions"]:
         account["positions"][symbol_upper] = {"total_shares": 0.0, "total_invested": 0.0}
@@ -426,6 +439,12 @@ async def execute_now(req: ExecuteNowRequest):
 @app.post("/sell-stock")
 async def sell_stock(req: SellOrderReq):
 
+    shares_to_sell=round(req.shares, 4)
+    if shares_to_sell < 0.0001:
+        raise HTTPException(status_code=400, detail="Minimum sell order quantity is 0.0001 shares.")
+
+    symbol_upper = req.symbol.upper()
+
     cal = market_status()
     if not cal["is_open"]:
         raise HTTPException(status_code=400, detail=f"Market CLOSED ({cal['day_name']} / Weekend). Cannot sell.")
@@ -434,11 +453,8 @@ async def sell_stock(req: SellOrderReq):
     if not account:
         raise HTTPException(status_code=404, detail="Account not found.")
 
-    if req.shares <= 0:
-        raise HTTPException(status_code=400, detail="Shares to sell must be greater than 0.")
-
-    symbol_upper = req.symbol.upper()
     positions = account.get("positions", {})
+
 
     if symbol_upper not in positions or positions[symbol_upper]["total_shares"] < req.shares:
         owned = positions.get(symbol_upper, {}).get("total_shares", 0.0)
