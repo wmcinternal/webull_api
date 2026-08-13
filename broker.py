@@ -87,6 +87,9 @@ def get_etf_price(symbol: str) -> float:
 
 
 
+
+
+
 def execute_recurring_dca(account_id: str, symbol: str, amount: float):
 
     account=accounts_db.get(account_id)
@@ -229,6 +232,11 @@ class ExecuteNowRequest(BaseModel):
     symbol: str
     amount: float
 
+class SellOrderReq(BaseModel):
+    account_id: str
+    symbol: str
+    shares: float
+
 
 @app.get("/account-summary")
 async def get_account_summary(account_id: str):
@@ -298,12 +306,168 @@ async def cancel_schedule(req: CancelSchedule):
     }
 
 
+class CashOperationReq(BaseModel):
+    account_id: str
+    amount: float
+
+
+@app.post("/deposit")
+async def deposit(req: CashOperationReq):
+
+    account=accounts_db[req.account_id]
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Deposit amount must be greater than $0.")
+
+    cal=market_status()
+    account["cash_balance"]+=req.amount
+
+    if "order_history" not in account:
+        account["order_history"] = []
+
+    account["order_history"].insert(0, {
+        "timestamp": cal["display_text"],
+        "type": "CASH DEPOSIT",
+        "symbol": "USD",
+        "shares": "-",
+        "price": "$1.00",
+        "total": f"+${req.amount:.2f}",
+        "status": "FILLED"
+    })
+
+    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
+
+
+@app.post("/withdraw")
+async def withdraw(req: CashOperationReq):
+
+    account=accounts_db[req.account_id]
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be greater than $0.")
+
+    if account["cash_balance"] < req.amount:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Insufficient funds. Available balance: ${account['cash_balance']:.2f}"
+        )
+    
+    cal=market_status()
+    account["cash_balance"]-=req.amount
+
+    if "order_history" not in account:
+        account["order_history"] = []
+
+    account["order_history"].insert(0, {
+        "timestamp": cal["display_text"],
+        "type": "CASH WITHDRAW",
+        "symbol": "USD",
+        "shares": "-",
+        "price": "$1.00",
+        "total": f"-${req.amount:.2f}",
+        "status": "FILLED"
+    })
+
+    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
+
+
+
 
 @app.post("/execute-now")
 async def execute_now(req: ExecuteNowRequest):
+
+    cal = market_status()
+    if not cal["is_open"]:
+        return {"status": "FAILED", "reason": f"Market CLOSED ({cal['day_name']} / Weekend). Instant buy unavailable."}
+
+    account=accounts_db[req.account_id]
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    if account["cash_balance"] < req.amount:
+        return {"status": "FAILED", "reason": f"Insufficient funds. Balance: ${account['cash_balance']:.2f}"}
+
+    symbol_upper = req.symbol.upper()
+    current_price = get_etf_price(symbol_upper)
+    shares_bought = round(req.amount / current_price, 4)
+
+    account["cash_balance"]-=req.amount
+
+
+
     return execute_recurring_dca(req.account_id, req.symbol.upper(), req.amount)
 
+    if symbol_upper not in account["positions"]:
+        account["positions"][symbol_upper] = {"total_shares": 0.0, "total_invested": 0.0}
 
+    account["positions"][symbol_upper]["total_shares"] += shares_bought
+    account["positions"][symbol_upper]["total_invested"] += req.amount
+
+    if "order_history" not in account:
+        account["order_history"]=[]
+    
+    account["order_history"].insert(0, {
+        "timestamp": cal["display_text"],
+        "type": "INSTANT BUY",
+        "symbol": symbol_upper,
+        "shares": f"+{shares_bought:.4f}",
+        "price": f"${current_price:.2f}",
+        "total": f"-${req.amount:.2f}",
+        "status": "FILLED"
+    })
+
+    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
+
+
+@app.post("/sell-stock")
+async def sell_stock(req: SellOrderReq):
+
+    cal = market_status()
+    if not cal["is_open"]:
+        raise HTTPException(status_code=400, detail=f"Market CLOSED ({cal['day_name']} / Weekend). Cannot sell.")
+
+    account = accounts_db.get(req.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+
+    if req.shares <= 0:
+        raise HTTPException(status_code=400, detail="Shares to sell must be greater than 0.")
+
+    symbol_upper = req.symbol.upper()
+    positions = account.get("positions", {})
+
+    if symbol_upper not in positions or positions[symbol_upper]["total_shares"] < req.shares:
+        owned = positions.get(symbol_upper, {}).get("total_shares", 0.0)
+        raise HTTPException(status_code=400, detail=f"Insufficient shares. You own {owned} {symbol_upper}.")
+
+    current_price = get_etf_price(symbol_upper)
+    proceeds = round(req.shares * current_price, 2)
+
+    positions[symbol_upper]["total_shares"] -= req.shares
+    positions[symbol_upper]["total_invested"] -= proceeds
+    if positions[symbol_upper]["total_invested"] < 0:
+        positions[symbol_upper]["total_invested"] = 0.0
+
+    account["cash_balance"] += proceeds
+
+    if "order_history" not in account:
+        account["order_history"] = []
+
+    account["order_history"].insert(0, {
+        "timestamp": cal["display_text"],
+        "type": "MARKET SELL",
+        "symbol": symbol_upper,
+        "shares": f"-{req.shares:.4f}",
+        "price": f"${current_price:.2f}",
+        "total": f"+${proceeds:.2f}",
+        "status": "FILLED"
+    })
+
+    return {"status": "SUCCESS", "cash_balance": account["cash_balance"], "proceeds": proceeds}
 
 
 @app.get("/", response_class=HTMLResponse)

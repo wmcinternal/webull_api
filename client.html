@@ -8,6 +8,11 @@
     <style>
         body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #ffffff; padding: 30px; }
         .form-group { margin-bottom: 15px; max-width: 350px; }
+        .panel { background: #111827; border: 1px solid #1e293b; border-radius: 8px; padding: 16px; margin-top: 20px; max-width: 600px; }
+        .panel-title { font-weight: bold; color: #38bdf8; margin-bottom: 12px; font-size: 15px; }
+
+        .action-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
+        .action-row .form-group { flex: 1; margin-bottom: 0; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #38bdf8; }
         input, select { width: 100%; padding: 8px; box-sizing: border-box; background: #141414; border: 1px solid #1e293b; color: #fff; border-radius: 4px; }
         button { padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -121,40 +126,64 @@
 
 
 
-    <div class="form-group">
-        <label>ETF Name</label>
-        <input type="text" id="symbol" value="SCHX">
+    <div class="panel">
+        <div class="panel-title">📅 Recurring DCA Scheduler</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+            <div class="form-group"><label>ETF Name</label><input type="text" id="symbol" value="SCHX"></div>
+            <div class="form-group"><label>Amount ($ USD)</label><input type="number" id="amount" value="100"></div>
+            <div class="form-group"><label>Execution Day (1-28)</label><input type="number" id="day_of_month" value="5"></div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button type="button" onclick="submitDcaOrder()" style="background: #0284c7;">Schedule Cron Job</button>
+            <button type="button" id="simToggleBtn" onclick="toggleSimulation()" style="background: #10b981;">▶️ Start Simulation (Every 10s)</button>
+        </div>
     </div>
 
-    <div class="form-group">
-        <label>Amount ($ USD)</label>
-        <input type="number" step="0.01" id="amount" value="100" >
-    </div>
-
-    <div class="form-group">
-        <label>Monthly Execution Day</label>
-        <input type="text" id="day_of_month" value="5"></input>
-    </div>
 
 
-    <button type="button" onclick="submitDcaOrder()">Schedule Cron Job</button>
-    <button type="button" id="simToggleBtn" onclick="toggleSimulation()" style="background: #10b981; margin-left: 10px;">▶️ Start Simulation (Every 10s)</button>
 
     <div id="responseContainer" style="display: none;">
         <h3>Order Result</h3>
         <div id="resultContent"></div>
     </div>
 
-
-    <div style="max-width: 600px; margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
-        <div style="flex: 1;">
-            <input type="number" id="deposit_amount" placeholder="Enter custom deposit amount ($ USD)" step="0.01" value="500.00" style="margin: 0;">
+    <div class="panel">
+        <div class="panel-title">💵 Cash Operations</div>
+        <div class="action-row">
+            <div class="form-group">
+                <label>Deposit Cash ($ USD)</label>
+                <input type="number" id="deposit_amount" value="500.00" step="0.01">
+            </div>
+            <button type="button" onclick="handleCustomDeposit()" style="background: #10b981; height: 35px;">💵 Deposit</button>
         </div>
-        <button type="button" onclick="handleCustomDeposit()" style="background: #10b981; white-space: nowrap;">
-            💵 Deposit Cash
-        </button>
+
+        <div class="action-row" style="margin-bottom: 0;">
+            <div class="form-group">
+                <label>Withdraw Cash ($ USD)</label>
+                <input type="number" id="withdraw_amount" value="200.00" step="0.01">
+            </div>
+            <button type="button" onclick="handleCustomWithdraw()" style="background: #f59e0b; height: 35px;">🏧 Withdraw</button>
+        </div>
     </div>
 
+
+    <div class="panel">
+        <div class="panel-title">⚡ Instant Stock Operations</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div class="form-group">
+                <label>ETF Ticker Symbol</label>
+                <input type="text" id="trade_symbol" value="SCHX">
+            </div>
+            <div class="form-group">
+                <label>Value / Quantity</label>
+                <input type="number" id="trade_value" value="100.00" step="0.01" placeholder="$ USD for Buy / Shares for Sell">
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button type="button" onclick="handleInstantBuy()" style="background: #0284c7; flex: 1;">⚡ Instant Buy ($ USD)</button>
+            <button type="button" onclick="handleSellStock()" style="background: #ef4444; flex: 1;">🔴 Sell Stock (Share Count)</button>
+        </div>
+    </div>
 
 </body>
 
@@ -488,6 +517,111 @@
         }
         
     }
+
+    async function handleCustomWithdraw() {
+
+        const account_id=document.getElementById("account_id").value;
+        const amountInput=document.getElementById("withdraw_amount").value;
+        const amount=parseInt(amountInput);
+
+
+        if (isNaN(amount) || amount <= 0) {
+            alert("Please enter a valid positive withdrawal amount.");
+            return;
+        }
+
+        try {
+            const response= await fetch("/withdraw", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ account_id: account_id, amount: amount})
+
+            });
+
+            const data= await response.json();
+
+            if (!response.ok) {
+                alert("Withdrawal failed: " + (data.detail || "Unknown error"));
+                return;           
+            }
+            
+            await loadAccountSummary();
+            amountInput.value= "";
+        
+        }
+        catch (error) {
+            console.error("Withdrawal error:", error);
+        }
+
+    }
+
+
+    async function handleInstantBuy() {
+        const account_id = document.getElementById("account_id").value;
+        const symbol = document.getElementById("trade_symbol").value;
+        const amount = parseFloat(document.getElementById("amount").value);
+        const shares= parseFloat(document.getElementById("trade_value").value);
+
+
+        
+
+        if (isNaN(amount) || amount <= 0) {
+            alert("Please enter a valid dollar amount.");
+            return;
+        }
+
+        try {
+            const response = await fetch("/execute-now", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ account_id: account_id, symbol: symbol, amount: amount })
+            });
+
+            const data = await response.json();
+            if (data.status === "FAILED") {
+                alert("Order Failed: " + data.reason);
+                return;
+            }
+
+            await loadAccountSummary();
+        } catch (error) {
+            console.error("Instant Buy Error:", error);
+        }
+    }
+
+    async function handleSellStock() {
+        const account_id = document.getElementById("account_id").value;
+        const symbol = document.getElementById("symbol").value;
+        const sharesStr = prompt(`Enter number of ${symbol.toUpperCase()} shares to sell:`, "1.0");
+        if (!sharesStr) return;
+
+        const shares = parseFloat(sharesStr);
+        if (isNaN(shares) || shares <= 0) {
+            alert("Please enter a valid number of shares.");
+            return;
+        }
+
+        try {
+            const response = await fetch("/sell-stock", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ account_id: account_id, symbol: symbol, shares: shares })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                alert("Sell Failed: " + (data.detail || "Unknown error"));
+                return;
+            }
+
+            await loadAccountSummary();
+        } catch (error) {
+            console.error("Sell Error:", error);
+        }
+    }
+
+
+
     
 
 
