@@ -16,10 +16,8 @@ BASE_URL = f"https://{HOST}"
 
 
 def generate_signature(path, query_params, body_string, app_key, app_secret, host, timestamp, nonce):
-    """
-    Generates the HMAC-SHA1 signature following Webull's official 3-step algorithm.
-    """
     
+
     signing_headers = {
         "x-app-key": app_key,
         "x-timestamp": timestamp,
@@ -57,9 +55,7 @@ def generate_signature(path, query_params, body_string, app_key, app_secret, hos
 
 
 def call_broker_api(method, path, query_params=None, body=None):
-    """
-    Constructs, signs, and executes the HTTP request to Webull.
-    """
+    
     query_params = query_params or {}
     
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -96,25 +92,54 @@ def call_broker_api(method, path, query_params=None, body=None):
 
     return resp
 
-
-if __name__ == "__main__":
-    print("--- TESTING WEBULL BROKER API CONNECTION ---")
     
-    test_path = "/openapi/broker/account/nd/detail"
-    test_params = {"account_id": "dummy_account_123"}
 
-    response = call_broker_api("GET", test_path, query_params=test_params)
+
+if __name__=="__main__":
+
+    print("--- CREATING VIRTUAL ACCOUNT ---")
+
+    test_path = "/openapi/broker/account/nd/create"
+
+    master_id="3bf3596d86454f1fa0bbe7d3a8281887"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "belong_account_id": master_id,
+        "account_type": "CASH",
+        "trading_permissions": ["US_STOCK_NORMAL"],
+        "w8ben_info": {
+            "treaty_country": "US",
+            "tax_id": "123-45-6789",
+            "sign_date": "2026-08-14",
+            "first_name": "Test",
+            "last_name": "User",
+            "middle_name": "hello",
+            "home_address": {
+              "country": "US",
+              "state": "NY",
+              "city": "New York",
+              "street_address": "1 Wall Street",
+              "postal_code": "10005"
+            },
+            "mail_address": {
+              "country": "US",
+              "state": "NY",
+              "city": "New York",
+              "street_address": "1 Wall Street",
+              "postal_code": "10005"
+            }
+        }
+    }
+
+    response=call_broker_api("POST", test_path, body=payload)
 
     print(f"HTTP Status Code: {response.status_code}")
-    print(f"Server Response Payload:\n{response.text}\n")
 
-    # Evaluate results based on response codes
     if response.status_code == 200:
-        print("✅ SUCCESS (200 OK): Full authentication and account match successful!")
-    elif response.status_code in (417, 400) or "INVALID_PARAMETER" in response.text:
-        print("🎉 AUTHENTICATION SUCCESS: Your App Key and App Secret are valid!")
-        print("Explanation: The server passed your security signature and only failed because 'dummy_account_123' does not exist.")
-    elif response.status_code == 401:
-        print("❌ AUTHENTICATION FAILED (401 UNAUTHORIZED): Check that your APP_KEY and APP_SECRET are correct.")
+
+        print("\n✅ SUCCESS! Here is your account list:")
+        print(json.dumps(response.json(), indent=2))
     else:
-        print(f"⚠️ Server returned unexpected status code: {response.status_code}")
+        print(f"\n❌ FAILED. Server Response:\n{response.text}")
+
