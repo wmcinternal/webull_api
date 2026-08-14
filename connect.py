@@ -105,7 +105,7 @@ if __name__=="__main__":
 
     payload = {
         "client_request_id": uuid.uuid4().hex.upper()[:32], 
-        "belong_account_id": master_id,
+        "belong_account_id": "985245368152788992",
         "account_type": "CASH",
         "trading_permissions": ["US_STOCK_NORMAL"],
         "w8ben_info": {
@@ -113,8 +113,8 @@ if __name__=="__main__":
             "tax_id": "123-45-6789",
             "sign_date": "2026-08-14",
             "first_name": "Test",
-            "last_name": "User",
             "middle_name": "hello",
+            "last_name": "User",
             "home_address": {
               "country": "US",
               "state": "NY",
