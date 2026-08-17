@@ -94,7 +94,7 @@ def call_broker_api(method, path, query_params=None, body=None):
 
     
 
-
+"""
 if __name__=="__main__":
 
     print("--- CREATING VIRTUAL ACCOUNT ---")
@@ -142,4 +142,21 @@ if __name__=="__main__":
         print(json.dumps(response.json(), indent=2))
     else:
         print(f"\n❌ FAILED. Server Response:\n{response.text}")
+"""
 
+
+if __name__=="__main__":
+    print("--- TESTING VIRTUAL ACCOUNT LIST ---")
+    
+    # The exact path you found in the documentation
+    test_path = "/broker/accounts/virtual-accounts/list"
+    
+    # Using your custom engine to make a GET request
+    response = call_broker_api("GET", test_path)
+    print(f"HTTP Status Code: {response.status_code}")
+    
+    if response.status_code == 200:
+        print("\n✅ SUCCESS! Here is the response:")
+        print(json.dumps(response.json(), indent=2))
+    else:
+        print(f"❌ Failed: {response.text}")
