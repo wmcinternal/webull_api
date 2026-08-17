@@ -92,76 +92,23 @@ def call_broker_api(method, path, query_params=None, body=None):
 
     return resp
 
-    
 
-"""
-if __name__=="__main__":
-
-    print("--- CREATING VIRTUAL ACCOUNT ---")
-
-    test_path = "/openapi/broker/account/nd/create"
-
-    master_id="3bf3596d86454f1fa0bbe7d3a8281887"
-
-    payload = {
-        "client_request_id": uuid.uuid4().hex.upper()[:32], 
-        "belong_account_id": "985245368152788992",
-        "account_type": "CASH",
-        "trading_permissions": ["US_STOCK_NORMAL"],
-        "w8ben_info": {
-            "treaty_country": "US",
-            "tax_id": "123-45-6789",
-            "sign_date": "2026-08-14",
-            "first_name": "Test",
-            "middle_name": "hello",
-            "last_name": "User",
-            "home_address": {
-              "country": "US",
-              "state": "NY",
-              "city": "New York",
-              "street_address": "1 Wall Street",
-              "postal_code": "10005"
-            },
-            "mail_address": {
-              "country": "US",
-              "state": "NY",
-              "city": "New York",
-              "street_address": "1 Wall Street",
-              "postal_code": "10005"
-            }
-        }
-    }
-
-    response=call_broker_api("POST", test_path, body=payload)
-
-    print(f"HTTP Status Code: {response.status_code}")
-
-    if response.status_code == 200:
-
-        print("\n✅ SUCCESS! Here is your account list:")
-        print(json.dumps(response.json(), indent=2))
-    else:
-        print(f"\n❌ FAILED. Server Response:\n{response.text}")
-"""
-
-if __name__=="__main__":
-
-    print("--- CREATING VIRTUAL ACCOUNT ---")
+def create_virtual_account(belong_account_id, first_name, last_name, tax_id):
 
     test_path = "/broker/accounts/virtual-accounts/create"
 
     payload = {
         "client_request_id": uuid.uuid4().hex.upper()[:32], 
-        "belong_account_id": "DMJAHP460LI2C2Q79N6S6F2DQB", 
+        "belong_account_id": belong_account_id, 
         "account_type": "CASH",
         "trading_permissions": ["US_STOCK_NORMAL"],
         "w8ben_info": {
             "treaty_country": "HK",
-            "tax_id": "123-45-6789",
-            "sign_date": "2026-08-17",
-            "first_name": "Test",
-            "middle_name": "Virtual",
-            "last_name": "User",
+            "tax_id": tax_id,
+            "sign_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "first_name": first_name,
+            "middle_name": "NA",
+            "last_name": last_name,
             "home_address": {
               "country": "HK",
               "state": "Hong Kong",
@@ -179,12 +126,77 @@ if __name__=="__main__":
         }
     }
 
+
     response = call_broker_api("POST", test_path, body=payload)
+    return response
+    
+def deposit_to_va(master_id, va_id, amount, currency="USD"):
 
+    path = "/broker/journals/cash-journals/create"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "from_account": master_id,
+        "to_account": va_id,
+        "currency": currency,
+        "amount": str(amount)  
+    }
+
+    response=call_broker_api("POST", path, body=payload)
+    return response
+
+
+def get_virtual_account_details(va_id):
+
+    path = "/broker/accounts/virtual-accounts/get"
+
+    query_params = {"account_id": va_id}
+
+    response= call_broker_api("GET", path, query_params=query_params)
+    return response
+
+
+def get_account_balance(account_id):
+
+    path = "/broker/assets/balances/get"
+    query_params = {"account_id": account_id}
+
+    response = call_broker_api("GET", path, query_params=query_params)
+    return response
+
+
+def instant_funding(account_id, amount, currency="USD"):
+
+    path="/broker/funding/instant-funding/create"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "account_id": account_id,
+        "type": "DEPOSIT",
+        "currency": currency,
+        "amount": str(amount)
+    }
+
+    response = call_broker_api("POST", path, body=payload)
+    return response
+
+
+
+if __name__=="__main__":
+
+    print("--- PROTOTYPE: INSTANT FUNDING ---")
+
+    ALICE_VA_ID = "0380EFNIKU8CP0K8C9B4000000"
+
+    print(f"\nDepositing funds into VA: {ALICE_VA_ID}...")
+    
+    # Using your perfectly named function!
+    response = instant_funding(ALICE_VA_ID, "50000.00", "USD")
+    
     print(f"HTTP Status Code: {response.status_code}")
-
+    
     if response.status_code == 200:
-        print("\n✅ VIRTUAL ACCOUNT CREATED SUCCESSFULLY!")
+        print("\n✅ DEPOSIT SUCCESSFUL! Funds added to VA:")
         print(json.dumps(response.json(), indent=2))
     else:
         print(f"\n❌ FAILED. Server Response:\n{response.text}")
