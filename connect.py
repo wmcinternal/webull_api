@@ -144,19 +144,47 @@ if __name__=="__main__":
         print(f"\n❌ FAILED. Server Response:\n{response.text}")
 """
 
-
 if __name__=="__main__":
-    print("--- TESTING VIRTUAL ACCOUNT LIST ---")
-    
-    # The exact path you found in the documentation
-    test_path = "/broker/accounts/virtual-accounts/list"
-    
-    # Using your custom engine to make a GET request
-    response = call_broker_api("GET", test_path)
+
+    print("--- CREATING VIRTUAL ACCOUNT ---")
+
+    test_path = "/broker/accounts/virtual-accounts/create"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "belong_account_id": "DMJAHP460LI2C2Q79N6S6F2DQB", 
+        "account_type": "CASH",
+        "trading_permissions": ["US_STOCK_NORMAL"],
+        "w8ben_info": {
+            "treaty_country": "HK",
+            "tax_id": "123-45-6789",
+            "sign_date": "2026-08-17",
+            "first_name": "Test",
+            "middle_name": "Virtual",
+            "last_name": "User",
+            "home_address": {
+              "country": "HK",
+              "state": "Hong Kong",
+              "city": "Central",
+              "street_address": "1 Queen's Road",
+              "postal_code": "999077"
+            },
+            "mail_address": {
+              "country": "HK",
+              "state": "Hong Kong",
+              "city": "Central",
+              "street_address": "1 Queen's Road",
+              "postal_code": "999077"
+            }
+        }
+    }
+
+    response = call_broker_api("POST", test_path, body=payload)
+
     print(f"HTTP Status Code: {response.status_code}")
-    
+
     if response.status_code == 200:
-        print("\n✅ SUCCESS! Here is the response:")
+        print("\n✅ VIRTUAL ACCOUNT CREATED SUCCESSFULLY!")
         print(json.dumps(response.json(), indent=2))
     else:
-        print(f"❌ Failed: {response.text}")
+        print(f"\n❌ FAILED. Server Response:\n{response.text}")
