@@ -6,10 +6,26 @@ import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from webull.core.client import ApiClient
-from webull.trade.trade_client import TradeClient
 from apscheduler.schedulers.background import BackgroundScheduler
+from database import init_db, load_db, save_db
 
+from connect import (
+
+    instant_funding,
+    instant_withdrawal,
+    get_account_balance,
+    get_account_positions,
+    place_limit_order,
+    place_order_by_amount,
+    place_order_by_qty,
+    create_virtual_account
+
+)
+
+init_db()
+accounts_db=load_db()
+
+MASTER_ACCOUNT_ID=""
 
 
 APP_KEY=os.getenv("WEBULL_APP_KEY")
@@ -24,28 +40,6 @@ scheduler.start()
 SERVER_START_TIME=datetime.now()
 
 
-trade_client=None
-if APP_KEY and APP_SECRET:
-    try:
-                
-        api_client=ApiClient(APP_KEY, APP_SECRET, "us")
-        api_client.add_endpoint("us", "broker-api.sandbox.webull.com")
-        trade_client=TradeClient(api_client)
-        print("✅ Webull Broker API Client Initialized.")
-        
-        res = trade_client.account_v2.get_account_list()
-        if res.status_code == 200:
-            print("Success!", json.dumps(res.json(), indent=2))
-        else:
-            print("Error:", res.status_code, res.text)
-    
-    except Exception as e:
-        print(f"Webull SDK init failed ({e}). Defaulting to MOCK MODE.")
-else:
-    print("No Webull API credentials found in environment. Running in MOCK MODE.")
-
-
-
 
 @app.get("/market-status")
 def market_status() -> dict:
@@ -55,7 +49,7 @@ def market_status() -> dict:
 
     current_sim_date = SERVER_START_TIME + timedelta(days=simulated_days_passed)
     
-    weekday_index = current_sim_date.weekday() # 0=Mon, ..., 5=Sat, 6=Sun
+    weekday_index = current_sim_date.weekday()   
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_name = days[weekday_index]
 
@@ -70,19 +64,6 @@ def market_status() -> dict:
         "status": "OPEN" if is_open else "CLOSED (Weekend)"
     }
 
-
-
-
-
-accounts_db = {
-    "C8193691": {
-        "cash_balance": 5000.00,  
-        "positions": {},
-        "scheduled_jobs": []
-    }
-
-
-}
 
 
 
@@ -254,38 +235,75 @@ class SellOrderReq(BaseModel):
 async def get_account_summary(account_id: str):
 
     if account_id not in accounts_db:
-        accounts_db[account_id]={
-            "cash_balance": 5000.00,
-            "positions":  {},
+        print(f"Client '{account_id}' not found. Creating new Webull Virtual Account...")
+        
+        create_resp = create_virtual_account(MASTER_ACCOUNT_ID, "Client", account_id, "000000000")
+        
+        if create_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Webull Account Creation Failed: {create_resp.text}")
+
+       
+        new_va_data = create_resp.json()
+        new_va_id = new_va_data.get("account_id")
+        
+        accounts_db[account_id] = {
+            "va_id": new_va_id,
             "scheduled_jobs": [],
             "order_history": []
         }
+        save_db(accounts_db) # Save the new row to the JSON file immediately!
+        print(f"✅ Assigned Webull VA {new_va_id} to Client {account_id}")
+        
     
-    account=accounts_db[account_id]
-
-    portfolio_value=0.0
-    portfolio={}
-
-    for symbol, pos in account["positions"].items():
-        current_price=get_etf_price(symbol)
-        market_value=pos["total_shares"]*current_price
-        portfolio_value+=market_value
-        portfolio[symbol]= {
-            "total_shares": pos["total_shares"],
-            "total_invested": pos["total_invested"],
-            "current_price": current_price,
-            "market_value": market_value
-    }
+    va_id = accounts_db[account_id]["va_id"]
     
-    net_account_value=account["cash_balance"]+ portfolio_value
+    
+    balance_resp = get_account_balance(va_id)
+    if balance_resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Webull Balance Check Failed: {balance_resp.text}")
+    
+    bal_data = balance_resp.json()
+    
+    usd_cash = 0.0
+    for asset in bal_data.get("account_currency_assets", []):
+        if asset.get("currency") == "USD":
+            usd_cash = float(asset.get("cash_balance", 0.0))
+
+
+    pos_resp = get_account_positions(va_id)
+    if pos_resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Webull Positions Check Failed: {pos_resp.text}")
+
+
+    pos_data = pos_resp.json()
+    portfolio = {}
+    portfolio_value = 0.0
+
+
+    positions_list = pos_data if isinstance(pos_data, list) else pos_data.get("positions", [])
+    for pos in positions_list:
+    
+        symbol = pos.get("ticker", pos.get("symbol", "UNKNOWN"))
+        shares = float(pos.get("quantity", 0.0))
+        market_val = float(pos.get("market_value", 0.0))
+        
+        portfolio_value += market_val
+        portfolio[symbol] = {
+            "total_shares": shares,
+            "total_invested": market_val, 
+            "current_price": float(pos.get("last_price", 0.0)),
+            "market_value": market_val
+        }
+
+    net_account_value = usd_cash + portfolio_value
 
     return {
         "account_id": account_id,
         "net_account_value": net_account_value,
-        "cash_balance": account["cash_balance"],
+        "cash_balance": usd_cash,
         "portfolio": portfolio,
-        "scheduled_jobs": account.get("scheduled_jobs", []),
-        "order_history": account.get("order_history", [])
+        "scheduled_jobs": accounts_db[account_id].get("scheduled_jobs", []),
+        "order_history": accounts_db[account_id].get("order_history", [])
     }
 
 
@@ -326,65 +344,40 @@ class CashOperationReq(BaseModel):
 @app.post("/deposit")
 async def deposit(req: CashOperationReq):
 
-    account=accounts_db[req.account_id]
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found.")
-
     if req.amount <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be greater than $0.")
 
-    cal=market_status()
-    account["cash_balance"]+=req.amount
+    if req.account_id not in accounts_db:
+        raise HTTPException(status_code=404, detail="Account not found in database. Load summary first.")
 
-    if "order_history" not in account:
-        account["order_history"] = []
+    va_id=accounts_db[req.account_id]["va_id"]
 
-    account["order_history"].insert(0, {
-        "timestamp": cal["display_text"],
-        "type": "CASH DEPOSIT",
-        "symbol": "USD",
-        "shares": "-",
-        "price": "$1.00",
-        "total": f"+${req.amount:.2f}",
-        "status": "FILLED"
-    })
+    resp=instant_funding(va_id, req.amount, "USD")
 
-    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Webull Error: {resp.text}")
+
+    return {"status": "SUCCESS", "message": f"Successfully deposited ${req.amount} via Webull!"}
+
 
 
 @app.post("/withdraw")
 async def withdraw(req: CashOperationReq):
 
-    account=accounts_db[req.account_id]
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found.")
-
     if req.amount <= 0:
         raise HTTPException(status_code=400, detail="Withdrawal amount must be greater than $0.")
 
-    if account["cash_balance"] < req.amount:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Insufficient funds. Available balance: ${account['cash_balance']:.2f}"
-        )
-    
-    cal=market_status()
-    account["cash_balance"]-=req.amount
+    if req.account_id not in accounts_db:
+        raise HTTPException(status_code=404, detail="Account not found in database.")
+        
+    va_id = accounts_db[req.account_id]["va_id"]
 
-    if "order_history" not in account:
-        account["order_history"] = []
+    resp=instant_withdrawal(va_id, req.amount, "USD")
 
-    account["order_history"].insert(0, {
-        "timestamp": cal["display_text"],
-        "type": "CASH WITHDRAW",
-        "symbol": "USD",
-        "shares": "-",
-        "price": "$1.00",
-        "total": f"-${req.amount:.2f}",
-        "status": "FILLED"
-    })
+    if resp.status_code!=200:
+        raise HTTPException(status_code=400, detail=f"Webull Error: {resp.text}")
 
-    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
+    return {"status": "SUCCESS", "message": f"Successfully withdrew ${req.amount} via Webull!"}
 
 
 
@@ -395,95 +388,40 @@ async def execute_now(req: ExecuteNowRequest):
     if req.amount < 5.00:
         raise HTTPException(status_code=400, detail="Minimum buy order size is $5.00 USD.")
 
-    cal = market_status()
-    account=accounts_db[req.account_id]
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found.")
-
-    if account["cash_balance"] < req.amount:
-        return {"status": "FAILED", "reason": f"Insufficient funds. Balance: ${account['cash_balance']:.2f}"}
-
+    if req.account_id not in accounts_db:
+        raise HTTPException(status_code=404, detail="Account not found. Load summary first.")
+        
+    va_id = accounts_db[req.account_id]["va_id"]
     symbol_upper = req.symbol.strip().upper()
 
-    current_price = get_etf_price(symbol_upper)
+    resp = place_order_by_amount(va_id, symbol_upper, req.amount, side="BUY")
 
-    shares_bought = round(req.amount / current_price, 4)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Webull Order Failed: {resp.text}")
 
+    return {"status": "SUCCESS", "message": f"Successfully placed BUY order for ${req.amount} of {symbol_upper}!"}
 
-
-
-    account["cash_balance"]-=req.amount
-
-    if symbol_upper not in account["positions"]:
-        account["positions"][symbol_upper] = {"total_shares": 0.0, "total_invested": 0.0}
-
-    account["positions"][symbol_upper]["total_shares"] += shares_bought
-    account["positions"][symbol_upper]["total_invested"] += req.amount
-
-    if "order_history" not in account:
-        account["order_history"]=[]
-    
-    account["order_history"].insert(0, {
-        "timestamp": cal["display_text"],
-        "type": "INSTANT BUY",
-        "symbol": symbol_upper,
-        "shares": f"+{shares_bought:.4f}",
-        "price": f"${current_price:.2f}",
-        "total": f"-${req.amount:.2f}",
-        "status": "FILLED"
-    })
-
-    return {"status": "SUCCESS", "cash_balance": account["cash_balance"]}
 
 
 @app.post("/sell-stock")
 async def sell_stock(req: SellOrderReq):
 
-    shares_to_sell=round(req.shares, 4)
-    if shares_to_sell < 0.0001:
+    if req.shares < 0.0001:
         raise HTTPException(status_code=400, detail="Minimum sell order quantity is 0.0001 shares.")
 
-    symbol_upper = req.symbol.upper()
+    if req.account_id not in accounts_db:
+        raise HTTPException(status_code=404, detail="Account not found. Load summary first.")
+        
+    va_id = accounts_db[req.account_id]["va_id"]
+    symbol_upper = req.symbol.strip().upper()
 
-    cal = market_status()
-    if not cal["is_open"]:
-        raise HTTPException(status_code=400, detail=f"Market CLOSED ({cal['day_name']} / Weekend). Cannot sell.")
+    resp = place_order_by_qty(va_id, symbol_upper, req.shares, side="SELL")
 
-    account = accounts_db.get(req.account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Webull Sell Failed: {resp.text}")
 
-    positions = account.get("positions", {})
+    return {"status": "SUCCESS", "message": f"Successfully placed SELL order for {req.shares} shares of {symbol_upper}!"}
 
-
-    if symbol_upper not in positions or positions[symbol_upper]["total_shares"] < req.shares:
-        owned = positions.get(symbol_upper, {}).get("total_shares", 0.0)
-        raise HTTPException(status_code=400, detail=f"Insufficient shares. You own {owned} {symbol_upper}.")
-
-    current_price = get_etf_price(symbol_upper)
-    proceeds = round(req.shares * current_price, 2)
-
-    positions[symbol_upper]["total_shares"] -= req.shares
-    positions[symbol_upper]["total_invested"] -= proceeds
-    if positions[symbol_upper]["total_invested"] < 0:
-        positions[symbol_upper]["total_invested"] = 0.0
-
-    account["cash_balance"] += proceeds
-
-    if "order_history" not in account:
-        account["order_history"] = []
-
-    account["order_history"].insert(0, {
-        "timestamp": cal["display_text"],
-        "type": "MARKET SELL",
-        "symbol": symbol_upper,
-        "shares": f"-{req.shares:.4f}",
-        "price": f"${current_price:.2f}",
-        "total": f"+${proceeds:.2f}",
-        "status": "FILLED"
-    })
-
-    return {"status": "SUCCESS", "cash_balance": account["cash_balance"], "proceeds": proceeds}
 
 
 @app.get("/", response_class=HTMLResponse)

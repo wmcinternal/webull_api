@@ -287,6 +287,27 @@ def place_limit_order(account_id, symbol, quantity, limit_price, side="BUY", mar
     
     return call_broker_api("POST", path, body=payload)
 
+
+
+
+def deposit_to_va(master_id, va_id, amount, currency="USD"):
+
+    path="/broker/journals/cash-journals/create"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "from_account": master_id, # <--- Right here!
+        "to_account": va_id,
+        "currency": currency,
+        "amount": str(amount)  
+    }
+
+    response=call_broker_api("POST", path, body=payload)
+    return response
+
+
+
+
 if __name__=="__main__":
 
     ALICE_VA_ID = "0380EFNIKU8CP0K8C9B4000000"
