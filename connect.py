@@ -182,21 +182,126 @@ def instant_funding(account_id, amount, currency="USD"):
 
 
 
-if __name__=="__main__":
+def get_account_positions(account_id):
 
-    print("--- PROTOTYPE: INSTANT FUNDING ---")
+    path= "/broker/assets/positions/list"
+
+    query_params= {"account_id": account_id}
+
+    response=call_broker_api("GET", path, query_params=query_params)
+    return response
+
+
+
+def instant_withdrawal(account_id, amount, currency="USD"):
+
+    path = "/broker/funding/instant-funding/create"
+
+    payload = {
+        "client_request_id": uuid.uuid4().hex.upper()[:32], 
+        "account_id": account_id,
+        "type": "WITHDRAWAL",  # This is the only line that changes!
+        "currency": currency,
+        "amount": str(amount)
+    }
+
+    response = call_broker_api("POST", path, body=payload)
+    return response
+
+
+
+def place_order_by_amount(account_id, symbol, amount, side="BUY", market="US"):
+
+    path="/broker/orders/place"
+
+    payload={
+        "account_id": account_id,
+        "new_orders": [
+            {
+                "combo_type": "NORMAL",
+                "client_order_id": uuid.uuid4().hex.upper()[:32],
+                "instrument_type": "EQUITY",
+                "market": market,
+                "symbol": symbol.upper(),
+                "order_type": "MARKET",
+                "entrust_type": "AMOUNT", # Tells Webull we are trading by dollar amount
+                "total_cash_amount": str(amount),
+                "support_trading_session": "ALL_DAY",
+                "time_in_force": "DAY",
+                "side": side.upper()
+            }
+        ]
+    }
+
+    return call_broker_api("POST", path, body=payload)
+
+
+def place_order_by_qty(account_id, symbol, quantity, side="SELL", market="US"):
+
+    path="/broker/orders/place"
+
+    payload = {
+        "account_id": account_id,
+        "new_orders": [
+            {
+                "combo_type": "NORMAL",
+                "client_order_id": uuid.uuid4().hex.upper()[:32],
+                "instrument_type": "EQUITY",
+                "market": market,
+                "symbol": symbol.upper(),
+                "order_type": "MARKET",
+                "entrust_type": "QTY", # Tells Webull we are trading by share count
+                "quantity": str(quantity),
+                "support_trading_session": "CORE",
+                "time_in_force": "DAY",
+                "side": side.upper()
+            }
+        ]
+    }
+
+    return call_broker_api("POST", path, body=payload)
+
+def place_limit_order(account_id, symbol, quantity, limit_price, side="BUY", market="US"):
+    
+    path = "/broker/orders/place"
+    
+    payload = {
+        "account_id": account_id,
+        "new_orders": [
+            {
+                "combo_type": "NORMAL",
+                "client_order_id": uuid.uuid4().hex.upper()[:32],
+                "instrument_type": "EQUITY",
+                "market": market,
+                "symbol": symbol.upper(),
+                "order_type": "LIMIT",
+                "entrust_type": "QTY", 
+                "quantity": str(quantity),
+                "limit_price": str(limit_price),
+                "support_trading_session": "ALL_DAY", 
+                "time_in_force": "DAY",
+                "side": side.upper()
+            }
+        ]
+    }
+    
+    return call_broker_api("POST", path, body=payload)
+
+if __name__=="__main__":
 
     ALICE_VA_ID = "0380EFNIKU8CP0K8C9B4000000"
 
-    print(f"\nDepositing funds into VA: {ALICE_VA_ID}...")
+    print("--- 1. CHECKING ALICE'S CURRENT WALLET ---")
+    balance_resp = get_account_balance(ALICE_VA_ID)
     
-    # Using your perfectly named function!
-    response = instant_funding(ALICE_VA_ID, "50000.00", "USD")
-    
-    print(f"HTTP Status Code: {response.status_code}")
-    
-    if response.status_code == 200:
-        print("\n✅ DEPOSIT SUCCESSFUL! Funds added to VA:")
-        print(json.dumps(response.json(), indent=2))
+    if balance_resp.status_code == 200:
+        print(json.dumps(balance_resp.json(), indent=2))
     else:
-        print(f"\n❌ FAILED. Server Response:\n{response.text}")
+        print(f"❌ Balance Check Failed:\n{balance_resp.text}")
+        
+    print("\n--- 2. ATTEMPTING ANOTHER DEPOSIT ---")
+    deposit_resp = instant_funding(ALICE_VA_ID, "50000.00", "USD")
+    if deposit_resp.status_code == 200:
+        print(json.dumps(deposit_resp.json(), indent=2))
+    else:
+        print(f"❌ Deposit Failed:\n{deposit_resp.text}")
